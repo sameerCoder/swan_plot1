@@ -1,0 +1,14 @@
+{%extends "layout.html"%}
+{%block content%}
+<link rel="stylesheet" href={{cdn_css | safe}} type="text/css" />
+<script type="text/javascript" src={{cdn_js0 | safe}}></script>
+<script type="text/javascript" src={{cdn_js | safe}}></script>
+<div class="about">
+    <h1>This is Webplot page</h1>
+    <p>This is a test website again</p>
+</div>
+{{script | safe}}
+{{div | safe}}
+{%endblock%}
+
+
