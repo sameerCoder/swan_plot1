@@ -1,0 +1,3 @@
+https://github.com/bokeh/bokeh/blob/8f0495bf9e99ff5c0f622d65595893258c73d615/examples/howto/server_embed/flask_embed.py
+
+https://github.com/bokeh/bokeh/blob/8f0495bf9e99ff5c0f622d65595893258c73d615/examples/howto/server_embed/flask_gunicorn_embed.py
