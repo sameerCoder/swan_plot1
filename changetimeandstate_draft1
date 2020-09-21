@@ -1,0 +1,165 @@
+from flask import Flask, render_template
+
+from bokeh.embed import server_document
+from bokeh.layouts import column
+from bokeh.models import ColumnDataSource, Slider
+from bokeh.plotting import figure
+from bokeh.server.server import Server
+from bokeh.themes import Theme
+from tornado.ioloop import IOLoop
+
+from bokeh.sampledata.sea_surface_temperature import sea_surface_temperature
+import pandas as pd
+
+import numpy as np
+import geoviews as gv
+
+import bokeh
+
+import panel as pn
+
+import holoviews as hv
+from holoviews import opts
+from holoviews.operation.datashader import datashade, rasterize
+hv.extension("bokeh")
+
+import math
+
+from bokeh.models import HoverTool
+
+from scipy.interpolate import griddata
+from scipy.io import loadmat
+
+import datetime
+
+from dateutil.parser import parse
+
+from datetime import timedelta
+app = Flask(__name__)
+def data_load():
+    datamat = loadmat('newtest_Tm02.mat')
+
+    Xp = datamat['Xp']
+    Yp = datamat['Yp']
+
+    # Xp=np.where(((Xp>= 85) & (Xp<=88) & (Yp>=19) & (Yp<=22)),Xp,88)
+    # Yp=np.where(((Xp>= 85) & (Xp<=88) & (Yp>=19) & (Yp<=22)),Yp,22)
+
+    # Read element file
+
+    tri_new = pd.read_csv('fort.ele', delim_whitespace=True, names=('A', 'B', 'C', 'D'), usecols=[1, 2, 3], skiprows=1,
+                          dtype={'D': np.int})
+
+    return Xp,Yp,datamat,tri_new
+
+def  data_select(Xp,Yp,datamat,tri_new,datetime, regions='Whole_East_Coast'):
+
+        dat = datetime
+        # datetostr=result.strftime("%Y%b%d%H")
+        dt = parse(str(dat))
+        yr = dt.year
+        mn = dt.month
+        d = dt.day
+        hr = dt.hour
+        mi = dt.minute
+
+        if hr < 10:
+
+            hr = '0' + str(hr)
+        else:
+            d = str(d)
+            hr = str(hr)
+        if int(d) < 10:
+            d = '0' + str(d)
+        else:
+            d = str(d)
+        varname = 'Tm02_' + str(yr) + '0' + str(mn) + str(d) + '_' + hr + '0000'
+
+        x = Xp.flatten()
+        y = Yp.flatten()
+        z = datamat[varname]
+
+        if regions is 'Odisha':
+            z = np.where(((Xp >= 85) & (Xp <= 88) & (Yp >= 19) & (Yp <= 22)), z, np.nan).flatten()
+        elif regions is 'Andra_Pradesh':
+            z = np.where(((Xp >= 79) & (Xp <= 85) & (Yp >= 13) & (Yp <= 19)), z, np.nan).flatten()
+        elif regions is 'Tamil_Nadu':
+            z = np.where(((Xp >= 77) & (Xp <= 83) & (Yp >= 7) & (Yp <= 14)), z, np.nan).flatten()
+        elif regions is 'Whole_East_Coast':
+            z = z.flatten()
+
+        else:
+            #         data = get_data4region(data,**odisha)
+            z = z.flatten()
+
+        # z = z.flatten()
+        Longitude = x
+        Latitude = y
+        MeanWavePeriod = z
+
+        pts = np.stack((Longitude, Latitude, MeanWavePeriod)).T
+        verts = pd.DataFrame(np.stack((Longitude, Latitude, MeanWavePeriod)).T,
+                             columns=['Longitude', 'Latitude', ' MeanWavePeriod'])
+
+        # openStreet Background.
+        tri_sub = tri_new.apply(lambda x: x - 1)
+        ggpoints = gv.Points(verts, vdims=[' MeanWavePeriod'])
+        ggsubraster = rasterize(gv.TriMesh((tri_sub, gv.Points(verts))))
+
+        tri = gv.TriMesh((tri_sub, gv.Points(verts)))
+
+        return tri
+
+def modify_doc(doc):
+    Xp,Yp,datamat,tri_new=data_load()
+    strt = datetime.datetime(2019, 7, 4, 0, 0)
+    end = datetime.datetime(2019, 1, 13, 0, 0)
+    from bokeh.models.callbacks import CustomJS
+
+    def perdelta(strt, end, delta):
+        curr = strt
+        while curr < end:
+            yield curr
+            curr += delta
+    def callback(attr, old, datetime,region):
+        data_select(Xp, Yp, datamat, tri_new, )
+        if datetime==strt & region=="Whole_East_Coast":
+            tri=data_select(Xp,Yp,datamat,tri_new,region,datetime=strt)
+            tiles = gv.tile_sources.Wikipedia
+        elif region=="Odisha":
+            data_select(Xp,Yp,datamat,tri_new,datetime,region="Odisha")
+        elif region=="Andra_Pradesh":
+            data_select(Xp,Yp,datamat,tri_new,datetime,region="Andra_Pradesh")
+        elif region=="Tamil_Nadu":
+            data_select(Xp,Yp,datamat,tri_new,datetime,region="Tamil_Nadu")
+        #source.data = ColumnDataSource(data=data).data
+
+    slider = Slider(start=0, end=10, value=0, step=1, title="Smoothing by N Days")
+    slider.on_change('value', callback)
+
+    doc.add_root(column(slider, plot))
+
+
+
+@app.route('/', methods=['GET'])
+def bkapp_page():
+    script = server_document('http://localhost:5006/bkapp')
+    return render_template("embed.html", script=script, template="Flask")
+
+
+def bk_worker():
+    # Can't pass num_procs > 1 in this configuration. If you need to run multiple
+    # processes, see e.g. flask_gunicorn_embed.py
+    server = Server({'/bkapp': modify_doc}, io_loop=IOLoop(), allow_websocket_origin=["localhost:8000"])
+    server.start()
+    server.io_loop.start()
+
+from threading import Thread
+Thread(target=bk_worker).start()
+
+if __name__ == '__main__':
+    print('Opening single process Flask app with embedded Bokeh application on http://localhost:8000/')
+    print()
+    print('Multiple connections may block the Bokeh app in this configuration!')
+    print('See "flask_gunicorn_embed.py" for one way to run multi-process')
+    app.run(port=8000)
